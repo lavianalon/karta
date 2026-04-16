@@ -65,7 +65,9 @@ ml-team    my-inference      CustomJob    Running     runner(2)                4
 
 ### `karta workload tree <name>`
 
-Hierarchical tree view: workload -&gt; components -&gt; instances -&gt; pods with status and resources.
+Hierarchical tree view: workload -> components -> instances -> pods with status and resources.
+
+Simple workload (PyTorchJob):
 
 ```shell
 $ karta workload tree llama-finetune
@@ -77,6 +79,27 @@ PyTorchJob/llama-finetune [Running]
     ├── Pod/llama-finetune-worker-1    Running   gpu: 8   node-03
     ├── Pod/llama-finetune-worker-2    Running   gpu: 8   node-04
     └── Pod/llama-finetune-worker-3    Pending   gpu: 8   <none>
+```
+
+Complex workload (Dynamo - multi-instance with nested children):
+
+```shell
+$ karta workload tree my-dynamo-graph
+DynamoGraphDeployment/my-dynamo-graph [Running]
+└── service
+    ├── Frontend (1 replica)
+    │   ├── Pod/frontend-0    Running   gpu: 1   node-01
+    │   └── Pod/frontend-1    Running   gpu: 1   node-02
+    ├── PrefillWorker (2 replicas)
+    │   ├── Pod/prefill-0     Running   gpu: 8   node-03
+    │   ├── Pod/prefill-1     Running   gpu: 8   node-04
+    │   ├── Pod/prefill-2     Running   gpu: 8   node-05
+    │   └── Pod/prefill-3     Running   gpu: 8   node-06
+    └── DecodeWorker (4 replicas)
+        ├── Pod/decode-0      Running   gpu: 4   node-07
+        ├── Pod/decode-1      Running   gpu: 4   node-08
+        ├── Pod/decode-2      Running   gpu: 4   node-09
+        └── Pod/decode-3      Running   gpu: 4   node-10
 ```
 
 ### `karta workload status <name>`
