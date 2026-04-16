@@ -55,7 +55,7 @@ List all workloads discovered via all known Kartas (community + cluster).
 
 ```shell
 $ karta workload list -n ml-team
-NAMESPACE  NAME              TYPE         PHASE       COMPONENTS               AGE
+NAMESPACE  NAME              KIND         PHASE       COMPONENTS               AGE
 ml-team    llama-finetune    PyTorchJob   Running     master(1), worker(4)     2h
 ml-team    embed-svc         KServe       Running     predictor(2)             5d
 ml-team    preprocess        JobSet       Completed   etl(3)                   1h
