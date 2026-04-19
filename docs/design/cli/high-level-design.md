@@ -19,6 +19,7 @@ No existing tool provides **workload-aware** visibility across different CRD typ
 - What workloads are running in my cluster, across all types, and what's their status?
 - What does the structure of a workload look like - which pods play which role (master, worker, head)?
 - How many GPUs does a workload consume across all its components?
+- How are the components of my inference pipeline performing - which are scaling, which are bottlenecked?
 
 Every workload type (PyTorchJob, RayCluster, JobSet, KServe) structures this information differently. Today, answering these questions requires per-CRD knowledge and manual inspection.
 
@@ -55,26 +56,33 @@ List all workloads discovered via all known Kartas (community + cluster).
 
 ```shell
 $ karta workload list -n ml-team
-NAMESPACE  NAME              KIND         PHASE       COMPONENTS               AGE
-ml-team    llama-finetune    PyTorchJob   Running     master(1), worker(4)     2h
-ml-team    embed-svc         KServe       Running     predictor(2)             5d
-ml-team    preprocess        JobSet       Completed   etl(3)                   1h
-ml-team    ray-train         RayCluster   Degraded    head(1), gpu-worker(3)   30m
-ml-team    my-inference      CustomJob    Running     runner(2)                4h
+NAMESPACE  NAME              KIND                      PHASE       COMPONENTS                                         GPU   AGE
+ml-team    llama-finetune    PyTorchJob                Running     master(1), worker(4)                               33    2h
+ml-team    embed-svc         KServe                    Running     predictor(2)                                       2     5d
+ml-team    preprocess        JobSet                    Completed   etl(3)                                             0     1h
+ml-team    ray-train         RayCluster                Degraded    head(1), gpu-worker(3)                             12    30m
+ml-team    my-pipeline       DynamoGraphDeployment     Running     Frontend(2), PrefillWorker(4), DecodeWorker(2)     48    1h
 ```
+
+Key flags:
+- `--phase <Running|Failed|...>` - filter by normalized phase
+- `--type <Kind>` - filter by workload kind (e.g. `PyTorchJob`, `DynamoGraphDeployment`)
+- `-l, --selector <labels>` - filter by labels (same syntax as `kubectl`)
+- `-A, --all-namespaces`
+- `-o <table|wide|json|yaml>` - output format. `-o json` emits the full `WorkloadView` for scripting and MCP consumers.
 
 ### `karta workload tree <name>`
 
-Hierarchical tree view: workload -> components -> instances -> pods with status and resources.
+Hierarchical tree view: workload -> components -> instances -> pods. Each component shows its readiness and resource usage inline, so operators can see the state of the workload at a glance without running additional commands.
 
 Simple workload (PyTorchJob):
 
 ```shell
 $ karta workload tree llama-finetune
 PyTorchJob/llama-finetune [Running]
-├── master (1 replica)
+├── master (1 replica)     1/1 ready   gpu: 1    nodes: node-01
 │   └── Pod/llama-finetune-master-0    Running   gpu: 1   node-01
-└── worker (4 replicas)
+└── worker (4 replicas)    3/4 ready   gpu: 32   nodes: node-02,03,04
     ├── Pod/llama-finetune-worker-0    Running   gpu: 8   node-02
     ├── Pod/llama-finetune-worker-1    Running   gpu: 8   node-03
     ├── Pod/llama-finetune-worker-2    Running   gpu: 8   node-04
@@ -87,15 +95,15 @@ Complex workload (Dynamo - multi-instance with nested children):
 $ karta workload tree my-dynamo-graph
 DynamoGraphDeployment/my-dynamo-graph [Running]
 └── service
-    ├── Frontend (1 replica)
+    ├── Frontend (2 replicas)         2/2 ready   gpu: 2    nodes: node-01,02
     │   ├── Pod/frontend-0    Running   gpu: 1   node-01
     │   └── Pod/frontend-1    Running   gpu: 1   node-02
-    ├── PrefillWorker (2 replicas)
+    ├── PrefillWorker (4 replicas)    4/4 ready   gpu: 32   nodes: node-03..06
     │   ├── Pod/prefill-0     Running   gpu: 8   node-03
     │   ├── Pod/prefill-1     Running   gpu: 8   node-04
     │   ├── Pod/prefill-2     Running   gpu: 8   node-05
     │   └── Pod/prefill-3     Running   gpu: 8   node-06
-    └── DecodeWorker (4 replicas)
+    └── DecodeWorker (4 replicas)     4/4 ready   gpu: 16   nodes: node-07..10
         ├── Pod/decode-0      Running   gpu: 4   node-07
         ├── Pod/decode-1      Running   gpu: 4   node-08
         ├── Pod/decode-2      Running   gpu: 4   node-09
@@ -259,6 +267,7 @@ type ComponentView struct {
     Scale      ScaleView
     Resources  ResourceSummary     // aggregated across instances (computed)
     ReadyCount string              // "3/4" (computed from live pods)
+    Nodes      []string            // distinct nodes hosting this component's pods (computed)
 }
 
 type ScaleView struct {
