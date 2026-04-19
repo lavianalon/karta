@@ -1,4 +1,4 @@
-# Karta CLI - Product Design
+# Karta CLI - High-Level Design
 
 ## Background
 
