@@ -25,6 +25,47 @@ Every workload type (PyTorchJob, RayCluster, JobSet, KServe) structures this inf
 
 Karta already has the abstraction layer to read any workload type uniformly. A CLI (and later web/MCP) can build on this to provide the missing visibility.
 
+### Side-by-side: kubectl-tree vs karta
+
+Consider a `DynamoGraphDeployment` with Frontend, PrefillWorker, and DecodeWorker roles.
+
+**kubectl-tree** - ownership walk:
+
+```shell
+$ kubectl tree dynamographdeployment my-pipeline
+NAMESPACE  NAME                                               READY
+ml-team    DynamoGraphDeployment/my-pipeline                  -
+ml-team    ├─DynamoComponentDeployment/my-pipeline-frontend   -
+ml-team    │ └─LeaderWorkerSet/my-pipeline-frontend           -
+ml-team    │   ├─Pod/my-pipeline-frontend-0-0                 True
+ml-team    │   └─Pod/my-pipeline-frontend-0-1                 True
+ml-team    ├─DynamoComponentDeployment/my-pipeline-prefill    -
+ml-team    │ └─LeaderWorkerSet/my-pipeline-prefill            -
+ml-team    │   ├─Pod/my-pipeline-prefill-0-0                  True
+...
+```
+
+**karta workload tree** - semantic walk:
+
+```shell
+$ karta workload tree my-pipeline
+DynamoGraphDeployment/my-pipeline [Running]
+└── service
+    ├── Frontend       (2/2 replicas)   2/2 ready
+    ├── PrefillWorker  (3/4 replicas)   3/3 ready
+    └── DecodeWorker   (4/4 replicas)   4/4 ready
+```
+
+What Karta brings on top, all derived from the Karta definition:
+
+- **Semantic role names** - Frontend / PrefillWorker / DecodeWorker come from the `nvidia.com/dynamo-component` label mapping declared in the Karta YAML.
+- **One component, multiple roles** - `service` is split into 3 instances via Karta's `componentInstanceSelector` - grouping by ownership would miss this.
+- **Normalized phase** - `Running` has the same meaning across PyTorchJob, RayCluster, Dynamo, etc., via Karta's `StatusMappings`.
+- **Desired vs current replicas** - `3/4 replicas` shows Karta's extracted scale target vs. the actual pod count, per role.
+- **Collapsed plumbing** - intermediate objects (DynamoComponentDeployment, LeaderWorkerSet) are declared as `additionalChildKinds` and hidden.
+
+**kubectl-tree walks ownership. Karta walks semantics.**
+
 ---
 
 ## Karta definition resolution
@@ -49,6 +90,16 @@ Two top-level nouns:
 karta workload ...        # operational: what's running in my cluster
 karta definition ...      # meta: what workload types does Karta understand
 ```
+
+### Namespace behavior
+
+- Karta definitions are **cluster-scoped**. Community definitions (embedded in the binary) and cluster definitions (CRDs) both apply across all namespaces.
+- Workloads are **namespaced**. All `karta workload *` commands follow standard kubectl conventions:
+  - `-n <namespace>` targets a specific namespace
+  - `-A, --all-namespaces` scans all namespaces
+  - Default is the namespace from the current kubeconfig context
+- `karta workload tree|status|resources <name>` operates on a single workload. The namespace is taken from `-n` or the current context. If the same name exists in multiple namespaces, the command errors and asks the user to specify `-n`.
+- Pod discovery for tree building happens in the workload's namespace - pods outside it are not considered.
 
 ### `karta workload list`
 
@@ -80,9 +131,9 @@ Simple workload (PyTorchJob):
 ```shell
 $ karta workload tree llama-finetune
 PyTorchJob/llama-finetune [Running]
-├── master (1 replica)     1/1 ready   gpu: 1    nodes: node-01
+├── master   (1/1 replicas)   1/1 ready   gpu: 1    nodes: node-01
 │   └── Pod/llama-finetune-master-0    Running   gpu: 1   node-01
-└── worker (4 replicas)    3/4 ready   gpu: 32   nodes: node-02,03,04
+└── worker   (4/4 replicas)   3/4 ready   gpu: 32   nodes: node-02,03,04
     ├── Pod/llama-finetune-worker-0    Running   gpu: 8   node-02
     ├── Pod/llama-finetune-worker-1    Running   gpu: 8   node-03
     ├── Pod/llama-finetune-worker-2    Running   gpu: 8   node-04
@@ -95,15 +146,14 @@ Complex workload (Dynamo - multi-instance with nested children):
 $ karta workload tree my-dynamo-graph
 DynamoGraphDeployment/my-dynamo-graph [Running]
 └── service
-    ├── Frontend (2 replicas)         2/2 ready   gpu: 2    nodes: node-01,02
+    ├── Frontend        (2/2 replicas)   2/2 ready   gpu: 2    nodes: node-01,02
     │   ├── Pod/frontend-0    Running   gpu: 1   node-01
     │   └── Pod/frontend-1    Running   gpu: 1   node-02
-    ├── PrefillWorker (4 replicas)    4/4 ready   gpu: 32   nodes: node-03..06
+    ├── PrefillWorker   (3/4 replicas)   3/3 ready   gpu: 24   nodes: node-03..05
     │   ├── Pod/prefill-0     Running   gpu: 8   node-03
     │   ├── Pod/prefill-1     Running   gpu: 8   node-04
-    │   ├── Pod/prefill-2     Running   gpu: 8   node-05
-    │   └── Pod/prefill-3     Running   gpu: 8   node-06
-    └── DecodeWorker (4 replicas)     4/4 ready   gpu: 16   nodes: node-07..10
+    │   └── Pod/prefill-2     Running   gpu: 8   node-05
+    └── DecodeWorker    (4/4 replicas)   4/4 ready   gpu: 16   nodes: node-07..10
         ├── Pod/decode-0      Running   gpu: 4   node-07
         ├── Pod/decode-1      Running   gpu: 4   node-08
         ├── Pod/decode-2      Running   gpu: 4   node-09
@@ -155,6 +205,16 @@ $ karta definition describe kubeflow-org-pytorchjob-v1
 $ karta definition validate ./my-custom-karta.yaml
 ✓ Valid Karta definition
 ```
+
+---
+
+## Distribution
+
+We will ship the CLI first as a **standalone binary**, with a clear path to becoming a kubectl plugin later.
+
+For v0.1, we plan to use [GoReleaser](https://goreleaser.com/) with GitHub Actions to build binaries for `darwin/linux × amd64/arm64` on every tag, distributed via GitHub Releases, a Homebrew tap (`brew install run-ai/tap/karta`), and `go install`. The CLI itself will be built on [Cobra](https://cobra.dev/), the standard Go framework for Kubernetes CLIs.
+
+In a later phase, we plan to add [krew](https://krew.sigs.k8s.io/) distribution so users can run `kubectl karta tree ...`. From day one the binary will support being invoked as either `karta` or `kubectl-karta` - Cobra does this out of the box, as long as help text uses `cmd.Name()` and we avoid hardcoding "karta" in error messages and usage strings. Enabling krew later will be a flag flip in GoReleaser plus a PR to [`kubernetes-sigs/krew-index`](https://github.com/kubernetes-sigs/krew-index).
 
 ---
 
