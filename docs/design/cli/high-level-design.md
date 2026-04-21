@@ -58,11 +58,11 @@ DynamoGraphDeployment/my-pipeline [Running]
 
 What Karta brings on top, all derived from the Karta definition:
 
-- **Semantic role names** - Frontend / PrefillWorker / DecodeWorker come from the `nvidia.com/dynamo-component` label mapping declared in the Karta YAML.
-- **One component, multiple roles** - `service` is split into 3 instances via Karta's `componentInstanceSelector` - grouping by ownership would miss this.
-- **Normalized phase** - `Running` has the same meaning across PyTorchJob, RayCluster, Dynamo, etc., via Karta's `StatusMappings`.
-- **Desired vs current replicas** - `3/4 replicas` shows Karta's extracted scale target vs. the actual pod count, per role.
-- **Collapsed plumbing** - intermediate objects (DynamoComponentDeployment, LeaderWorkerSet) are declared as `additionalChildKinds` and hidden.
+- **Semantic role names** - Frontend / PrefillWorker / DecodeWorker come from the label mapping declared in the Karta YAML.
+- **Pods grouped by their role, not by their owner** - pods playing different roles are shown as separate groups even when they share the same owning resource.
+- **Normalized phase** - `Running` has the same meaning across PyTorchJob, RayCluster, Dynamo, etc.
+- **Desired vs current replicas** - `3/4 replicas` shows the scale target vs. the actual pod count, per role.
+- **Collapsed plumbing** - intermediate objects (DynamoComponentDeployment, LeaderWorkerSet) are optionally hidden to reduce noise while keeping the semantic hierarchy visible.
 
 **kubectl-tree walks ownership. Karta walks semantics.**
 
