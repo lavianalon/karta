@@ -122,6 +122,8 @@ Key flags:
 - `-A, --all-namespaces`
 - `-o <table|wide|json|yaml>` - output format. `-o json` emits the full `WorkloadView` for scripting and MCP consumers.
 
+Clusters can be huge - thousands of workloads across many types is a realistic scenario for our users. `karta workload list` must support pagination so the first page loads quickly and users can narrow the view with filters (`-n`, `-l`, `--type`) before fetching more. The default ordering of the list should be defined with the product team.
+
 ### `karta workload tree <name>`
 
 Hierarchical tree view: workload -> components -> instances -> pods. Each component shows its readiness and resource usage inline, so operators can see the state of the workload at a glance without running additional commands.
